@@ -14,6 +14,8 @@
       --status-ok: #22c55e; --status-err: #ef4444; --status-loading: #f59e0b;
     }
     body { font-family:'DM Sans',sans-serif; background:var(--bg); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+ 
+    /* ── Control bar ── */
     #tts-controls { display:flex; align-items:center; gap:10px; padding:0 16px; height:54px; flex-shrink:0; background:var(--bar-bg); border-bottom:1px solid var(--bar-border); }
     .bar-label { font-size:11px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--text-muted); }
     #status-pill { display:flex; align-items:center; gap:6px; background:var(--btn-bg); border:1px solid var(--btn-border); border-radius:20px; padding:4px 12px; font-size:12px; color:var(--text-muted); min-width:130px; }
@@ -38,8 +40,54 @@
     .ctrl-btn:hover { background:var(--btn-hover); border-color:#94a3b8; }
     .ctrl-btn:active { transform:scale(.97); }
     .ctrl-btn.muted { background:#fef2f2; border-color:#fca5a5; color:var(--status-err); }
+ 
+    /* ── Survey wrapper ── */
     #survey-wrapper { flex:1; position:relative; overflow:hidden; }
     #tally-iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
+ 
+    /* ── Start overlay — sits over everything until user clicks ── */
+    #start-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(244, 246, 249, 0.92);
+      backdrop-filter: blur(4px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 100;
+      transition: opacity 0.4s ease;
+    }
+    #start-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #start-overlay p {
+      font-size: 15px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    #btn-start {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(37,99,235,0.35);
+      transition: background .15s, transform .1s, box-shadow .15s;
+    }
+    #btn-start:hover { background: #1d4ed8; transform: translateY(-1px); box-shadow: 0 6px 24px rgba(37,99,235,0.4); }
+    #btn-start:active { transform: scale(.97); }
+ 
+    /* ── Debug / Toast ── */
     #debug-panel { display:none; position:fixed; bottom:0; left:0; right:0; background:#0f172a; color:#94a3b8; font-family:'Courier New',monospace; font-size:11.5px; padding:10px 16px; max-height:160px; overflow-y:auto; z-index:9999; border-top:2px solid #334155; }
     #debug-panel.visible { display:block; }
     .log-line { margin:2px 0; line-height:1.5; }
@@ -51,7 +99,7 @@
   </style>
 </head>
 <body>
-
+ 
   <div id="tts-controls">
     <span class="bar-label">🔊 Audio</span>
     <div id="status-pill"><span id="status-dot"></span><span id="status-text">Ready</span></div>
@@ -63,7 +111,7 @@
     <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
     <button class="ctrl-btn" id="btn-debug">🐛 Debug</button>
   </div>
-
+ 
   <div id="survey-wrapper">
     <iframe
       id="tally-iframe"
@@ -73,41 +121,67 @@
       marginwidth="0"
       title="JTCHS Survey"
     ></iframe>
+ 
+    <!-- Overlay shown on load — click unlocks audio and starts survey -->
+    <div id="start-overlay">
+      <p>Audio-assisted survey — click below to begin</p>
+      <button id="btn-start">🔊 Start Survey</button>
+    </div>
   </div>
-
+ 
   <div id="debug-panel"></div>
   <div id="toast"></div>
-
+ 
   <script>
     // ═══════════════════════════════════════════════
-    //  CONFIG — only the Worker URL lives here
-    //  The API key is stored securely in Cloudflare
+    //  CONFIG
     // ═══════════════════════════════════════════════
     var WORKER_URL = "https://jtchs-form.thankyoudom.workers.dev/tts";
-    // ↑ Replace with your actual Worker URL after deploying
-    // Find it in Cloudflare → Workers & Pages → your worker → copy the URL
 
     var pageMap = {
       1: "Welcome to the JTCHS survey. Please click Next to begin.",
-      2: "Question 1: I feel that my values align with the company mission and culture. Select a number from 1 to 10.",
-      3: "Question 2: I understand how my role contributes to the company's overall strategy. Select a number from 1 to 10.",
-      4: "Question 3: I feel supported by my manager in my professional development. Select a number from 1 to 10."
+      2: "Question 1: I am,  60 - 64 years old, 65 - 69 years old, 70 - 74 years old, 75 - 79 years old, 80 years or older",
+      3: "Question 2: I am, female, or, I am, male,",
+      4: "Question 3: I have doctor appointments, once per year, twice per year, three times per year, four or more times per year",
+      5: "Question 4: I require transportation to my appoints, yes, or no ",
+      6: "Question 5: Fatigue: In the last 4 weeks, how much of the time did you feel tired? All or most of the time, Usually none of the time",
+      7: "Question 6: Resistance: Do you have any difficulty walking up 10 steps alone without resting or aids? yes, or no ",
+      8: "Question 7: Aerobic/Ambulation: Do you have any difficulty walking several hundred yards alone without aids? yes, or no ",
+      9: "Question 8: Illnesses: Do you have 5 or more illnesses (out of 11 common conditions)? yes, or no ",
+      10: "Question 9: Loss of Weight: Have you lost more than 5% of your total body weight in the past 6 months? yes, or no ",
+      11: "Question 10: My appetite is, very poor, poor, average, good, very good",
+      12: "Question 11: Food tastes, very poor, poor, average, good, very good",
+      13: "Question 12: When I eat, I feel full after eating only a few mouthfuls, I feel full after eating about a third of the meal, I feel full after eating over half a meal, I feel full after eating most of the meal, I hardly ever feel full  ",
+      14: "Question 13: Normally I eat, Less than onemeal a day, One meal a day, Two meals a day, Three meals a day, More than three meals a day",
+      15: "Question 14: I enjoyed learning using Pepper. yes, or no",
+      16: "Question 15: I needed help with using Pepper. yes, or no",
+      17: "Question 13: I felt comfortable using Pepper to answer questions about my health. yes, or no",
+      18: "Question 14: Using Pepper made me feel comfortable using technology for my healthcare, agree , neutral, disagree"
     };
     var submitText = "Thank you for completing the survey. Your responses have been recorded.";
     var totalPages = Object.keys(pageMap).length;
 
-    var currentPage  = 1;
-    var muted        = false;
-    var currentAudio = null;
-    var audioCache   = {};
-
-    var debugPanel = document.getElementById("debug-panel");
-    var statusDot  = document.getElementById("status-dot");
-    var statusText = document.getElementById("status-text");
-    var waveform   = document.getElementById("waveform");
-    var qCounter   = document.getElementById("q-counter");
-    var toast      = document.getElementById("toast");
-
+        // ═══════════════════════════════════════════════
+    //  State
+    // ═══════════════════════════════════════════════
+    var currentPage    = 1;
+    var muted          = false;
+    var currentAudio   = null;
+    var audioCache     = {};
+    var audioUnlocked  = false;  // true after first user gesture
+    var pendingText    = null;   // text queued before unlock
+ 
+    // ═══════════════════════════════════════════════
+    //  UI refs
+    // ═══════════════════════════════════════════════
+    var debugPanel    = document.getElementById("debug-panel");
+    var statusDot     = document.getElementById("status-dot");
+    var statusText    = document.getElementById("status-text");
+    var waveform      = document.getElementById("waveform");
+    var qCounter      = document.getElementById("q-counter");
+    var toast         = document.getElementById("toast");
+    var startOverlay  = document.getElementById("start-overlay");
+ 
     function log(msg, type) {
       var line = document.createElement("div");
       line.className = "log-line " + (type || "info");
@@ -119,7 +193,7 @@
     document.getElementById("btn-debug").addEventListener("click", function() {
       debugPanel.classList.toggle("visible");
     });
-
+ 
     function setStatus(s, t) { statusDot.className = s || ""; statusText.textContent = t || "Ready"; }
     function setWave(on) { waveform.classList.toggle("active", on); }
     function updateCounter(p) { qCounter.textContent = "Page " + p + " / " + totalPages; }
@@ -130,23 +204,47 @@
       clearTimeout(toastTimer);
       toastTimer = setTimeout(function() { toast.classList.remove("show"); }, 2800);
     }
-
+ 
     // ═══════════════════════════════════════════════
-    //  TTS — calls Cloudflare Worker (no key in browser)
+    //  Start button — unlocks audio + hides overlay
+    // ═══════════════════════════════════════════════
+    document.getElementById("btn-start").addEventListener("click", function() {
+      audioUnlocked = true;
+      startOverlay.classList.add("hidden");
+      log("Audio unlocked by user gesture", "ok");
+ 
+      // Play whatever was queued (page 1 welcome)
+      if (pendingText) {
+        var text = pendingText;
+        pendingText = null;
+        fetchAndPlay(text);
+      }
+    });
+ 
+    // ═══════════════════════════════════════════════
+    //  TTS — Cloudflare Worker proxy
     // ═══════════════════════════════════════════════
     function fetchAndPlay(text) {
       if (muted || !text) return;
+ 
+      // If audio not yet unlocked, queue and wait
+      if (!audioUnlocked) {
+        log("Audio not yet unlocked — queuing: \"" + text.substring(0, 40) + "\"");
+        pendingText = text;
+        return;
+      }
+ 
       stopAudio();
-
+ 
       if (audioCache[text]) {
         log("Cache hit — playing instantly", "ok");
         playBlob(audioCache[text]);
         return;
       }
-
+ 
       setStatus("loading", "Generating…");
-      log("POST → Worker | text: \"" + text.substring(0, 50) + "\"");
-
+      log("POST → Worker: \"" + text.substring(0, 50) + "\"");
+ 
       fetch(WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -173,7 +271,7 @@
         showToast("⚠️ Audio error — click 🐛 Debug");
       });
     }
-
+ 
     function playBlob(blob) {
       var url = URL.createObjectURL(blob);
       var audio = new Audio(url);
@@ -185,19 +283,14 @@
         log("Autoplay blocked: " + err.message, "err");
         setStatus("", "Tap to play");
         showToast("👆 Click anywhere, then hit Replay");
-        var retry = function() {
-          document.removeEventListener("click", retry);
-          if (currentAudio) currentAudio.play().catch(function(){});
-        };
-        document.addEventListener("click", retry);
       });
     }
-
+ 
     function stopAudio() {
       if (currentAudio) { currentAudio.pause(); currentAudio.onended = null; currentAudio = null; }
       setWave(false);
     }
-
+ 
     // ═══════════════════════════════════════════════
     //  Tally postMessage handler
     // ═══════════════════════════════════════════════
@@ -207,28 +300,32 @@
       var event = msg.event; var payload = msg.payload || {};
       if (!event || !event.startsWith("Tally.")) return;
       log(event + " | page=" + (payload.page || "-"), "ok");
+ 
       if (event === "Tally.FormPageView") {
         currentPage = payload.page || 1;
         updateCounter(currentPage);
         var text = pageMap[currentPage];
         if (text) fetchAndPlay(text);
       }
+ 
       if (event === "Tally.FormSubmitted") {
         updateCounter(totalPages);
         fetchAndPlay(submitText);
         showToast("✓ Survey submitted");
       }
     });
-
+ 
     // ═══════════════════════════════════════════════
     //  Controls
     // ═══════════════════════════════════════════════
     document.getElementById("btn-replay").addEventListener("click", function() {
       if (muted) { showToast("Unmute first"); return; }
-      fetchAndPlay(pageMap[currentPage] || submitText);
+      var text = pageMap[currentPage] || submitText;
+      if (!audioUnlocked) { audioUnlocked = true; startOverlay.classList.add("hidden"); }
+      fetchAndPlay(text);
       showToast("↺ Replaying…");
     });
-
+ 
     document.getElementById("btn-mute").addEventListener("click", function() {
       muted = !muted;
       if (muted) {
@@ -240,10 +337,29 @@
         setStatus("", "Ready"); showToast("Audio on");
       }
     });
-
+ 
+    // ═══════════════════════════════════════════════
+    //  Init
+    // ═══════════════════════════════════════════════
     window.addEventListener("load", function() {
       updateCounter(1);
       log("JTCHS Survey loaded | proxy=Cloudflare Worker | voice=nova", "ok");
+      // Pre-fetch welcome audio in background while user reads the overlay
+      // It'll be cached and ready to play the instant they click Start
+      setTimeout(function() {
+        log("Pre-fetching welcome audio…");
+        fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: pageMap[1] })
+        })
+        .then(function(r) { return r.ok ? r.blob() : Promise.reject(r.status); })
+        .then(function(blob) {
+          audioCache[pageMap[1]] = blob;
+          log("Welcome audio pre-cached — ready to play instantly", "ok");
+        })
+        .catch(function(err) { log("Pre-fetch failed: " + err, "err"); });
+      }, 500);
     });
   </script>
 </body>
