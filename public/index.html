@@ -183,17 +183,7 @@
     var toast         = document.getElementById("toast");
     var startOverlay  = document.getElementById("start-overlay");
  
-    function log(msg, type) {
-      var line = document.createElement("div");
-      line.className = "log-line " + (type || "info");
-      line.textContent = "[" + new Date().toLocaleTimeString("en-US", {hour12:false}) + "] " + msg;
-      debugPanel.appendChild(line);
-      debugPanel.scrollTop = debugPanel.scrollHeight;
-      if (type === "err") debugPanel.classList.add("visible");
-    }
-    document.getElementById("btn-debug").addEventListener("click", function() {
-      debugPanel.classList.toggle("visible");
-    });
+    
  
     function setStatus(s, t) { statusDot.className = s || ""; statusText.textContent = t || "Ready"; }
     function setWave(on) { waveform.classList.toggle("active", on); }
