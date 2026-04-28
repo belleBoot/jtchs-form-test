@@ -35,7 +35,6 @@ yarn-error.log*
 **/.env.test.local
 **/.env.production.local
 !packages/database/.env
-!apps/web/.env
 
 # build tools
 .turbo
