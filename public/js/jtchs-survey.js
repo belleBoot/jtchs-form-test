@@ -95,6 +95,7 @@
   var cfg = window.JTCHS_CONFIG || {};
   var WORKER_URL = cfg.workerTtsUrl || "";
   var SUBMIT_URL = cfg.submitUrl || "";
+  var FORMBRICKS = cfg.formbricks || null;
   var QUESTIONS = window.JTCHS_QUESTIONS || [];
   var submitText =
     cfg.submitText ||
@@ -325,6 +326,69 @@
       btnNext.disabled = false;
       log("Submit failed: " + msg, "err");
       showToast("Submit failed — see Debug");
+    }
+
+    function isFormbricksConfigured() {
+      return (
+        FORMBRICKS &&
+        typeof FORMBRICKS.appUrl === "string" &&
+        FORMBRICKS.appUrl &&
+        typeof FORMBRICKS.environmentId === "string" &&
+        FORMBRICKS.environmentId &&
+        typeof FORMBRICKS.surveyId === "string" &&
+        FORMBRICKS.surveyId
+      );
+    }
+
+    function submitToFormbricks() {
+      var appUrl = FORMBRICKS.appUrl.replace(/\/+$/, "");
+      var environmentId = FORMBRICKS.environmentId;
+      var surveyId = FORMBRICKS.surveyId;
+      var dataMap = FORMBRICKS.dataMap || {};
+
+      var data = {};
+      for (var idx = 0; idx < totalPages; idx++) {
+        var kioskId = QUESTIONS[idx].id || "q" + (idx + 1);
+        var elementId = dataMap[kioskId];
+        if (!elementId) continue;
+        data[elementId] = answers[idx];
+      }
+
+      var url = appUrl + "/api/v2/client/" + environmentId + "/responses";
+      var body = {
+        surveyId: surveyId,
+        finished: true,
+        data: data,
+        meta: {
+          source: "pepper-kiosk",
+          url: (function () {
+            try {
+              return String(window.location && window.location.href ? window.location.href : "");
+            } catch (e) {
+              return "";
+            }
+          })(),
+        },
+      };
+
+      log("Submitting to Formbricks v2 client API", "info");
+      httpPostJson(
+        url,
+        body,
+        function (res) {
+          var id = res && res.data && res.data.id ? res.data.id : res && res.id ? res.id : null;
+          log("Formbricks submit OK" + (id ? " | id=" + id : ""), "ok");
+          doneOk();
+        },
+        function (e) {
+          doneFail(e && e.message ? e.message : String(e));
+        }
+      );
+    }
+
+    if (!SUBMIT_URL && isFormbricksConfigured()) {
+      submitToFormbricks();
+      return;
     }
 
     if (!SUBMIT_URL) {
