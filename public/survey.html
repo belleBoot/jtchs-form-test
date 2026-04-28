@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>JTCHS Survey</title>
+  <!--
+    Formbricks: you do NOT need to share any account with developers.
+    - Point submitUrl to your own Worker/HTTPS endpoint; keep API keys only in that backend.
+    - To post into Formbricks, translate the JSON body server-side into POST
+      /api/v2/client/{environmentId}/responses with `data` keyed by your survey element IDs
+      (export the survey from Formbricks to learn those IDs). Validate answer shapes against
+      each question type (multiple choice, NPS, etc.).
+    - Leave submitUrl empty to run in demo mode (stores last payload in localStorage only).
+  -->
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #f4f6f9; --bar-bg: #ffffff; --bar-border: #e2e8f0;
+      --text-primary: #1e293b; --text-muted: #64748b; --accent: #2563eb;
+      --btn-bg: #f1f5f9; --btn-border: #cbd5e1; --btn-hover: #e2e8f0;
+      --status-ok: #22c55e; --status-err: #ef4444; --status-loading: #f59e0b;
+    }
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--bg);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #tts-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      height: 54px;
+      flex-shrink: 0;
+      background: var(--bar-bg);
+      border-bottom: 1px solid var(--bar-border);
+    }
+    .bar-label { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); font-family: system-ui, sans-serif; }
+    #status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--btn-bg);
+      border: 1px solid var(--btn-border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      min-width: 130px;
+      font-family: system-ui, sans-serif;
+    }
+    #status-dot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; flex-shrink: 0; }
+    #status-dot.loading { background: var(--status-loading); animation: pulse 1s infinite; }
+    #status-dot.playing { background: var(--status-ok); }
+    #status-dot.error { background: var(--status-err); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+    #waveform { display: flex; align-items: center; gap: 2px; height: 18px; opacity: 0; transition: opacity .3s; }
+    #waveform.active { opacity: 1; }
+    #waveform span { display: block; width: 3px; border-radius: 2px; background: var(--accent); animation: wave .8s ease-in-out infinite; }
+    #waveform span:nth-child(1) { height: 6px; animation-delay: 0s; }
+    #waveform span:nth-child(2) { height: 14px; animation-delay: .1s; }
+    #waveform span:nth-child(3) { height: 10px; animation-delay: .2s; }
+    #waveform span:nth-child(4) { height: 16px; animation-delay: .15s; }
+    #waveform span:nth-child(5) { height: 8px; animation-delay: .05s; }
+    @keyframes wave { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.4); } }
+    .spacer { flex: 1; }
+    #q-counter {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--btn-bg);
+      border: 1px solid var(--btn-border);
+      border-radius: 8px;
+      padding: 5px 12px;
+      font-family: system-ui, sans-serif;
+    }
+    .ctrl-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--btn-bg);
+      border: 1px solid var(--btn-border);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: system-ui, sans-serif;
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+    }
+    .ctrl-btn:active { transform: scale(.97); }
+    .ctrl-btn.muted { background: #fef2f2; border-color: #fca5a5; color: var(--status-err); }
+    #survey-wrapper { flex: 1; position: relative; overflow: auto; padding: 20px 24px 100px; }
+    #question-text {
+      font-size: 22px;
+      line-height: 1.35;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+      max-width: 52rem;
+    }
+    #choices { display: flex; flex-direction: column; gap: 10px; max-width: 40rem; }
+    .choice-btn {
+      text-align: left;
+      padding: 14px 18px;
+      font-size: 17px;
+      border: 2px solid var(--btn-border);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text-primary);
+      cursor: pointer;
+      font-family: system-ui, sans-serif;
+    }
+    .choice-btn.selected { border-color: var(--accent); background: #eff6ff; }
+    .choice-btn:active { transform: scale(.995); }
+    #nav-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 14px 20px 18px;
+      background: rgba(255, 255, 255, 0.96);
+      border-top: 1px solid var(--bar-border);
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+    #btn-back, #btn-next {
+      min-width: 120px;
+      padding: 14px 22px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: system-ui, sans-serif;
+      border: none;
+    }
+    #btn-back { background: var(--btn-bg); color: var(--text-primary); border: 1px solid var(--btn-border); }
+    #btn-next { background: var(--accent); color: #fff; }
+    #btn-next:disabled { opacity: .5; cursor: not-allowed; }
+    #start-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(244, 246, 249, 0.94);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 500;
+      transition: opacity 0.4s ease;
+    }
+    #start-overlay.hidden { opacity: 0; pointer-events: none; }
+    #start-overlay p { font-size: 16px; color: var(--text-muted); font-weight: 500; font-family: system-ui, sans-serif; }
+    #btn-start {
+      padding: 14px 32px;
+      font-size: 17px;
+      font-weight: 600;
+      font-family: system-ui, sans-serif;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    #debug-panel {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #0f172a;
+      color: #94a3b8;
+      font-family: "Courier New", monospace;
+      font-size: 11.5px;
+      padding: 10px 16px;
+      max-height: 160px;
+      overflow-y: auto;
+      z-index: 9999;
+      border-top: 2px solid #334155;
+    }
+    #debug-panel.visible { display: block; }
+    .log-line { margin: 2px 0; line-height: 1.5; }
+    .log-line.err { color: #f87171; }
+    .log-line.ok { color: #4ade80; }
+    .log-line.info { color: #60a5fa; }
+    #toast {
+      position: fixed;
+      bottom: 88px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #1e293b;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 10px 20px;
+      border-radius: 10px;
+      z-index: 9998;
+      pointer-events: none;
+      transition: transform .3s, opacity .3s;
+      opacity: 0;
+      max-width: 90vw;
+      font-family: system-ui, sans-serif;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  </style>
+  <script>
+    window.JTCHS_CONFIG = {
+      workerTtsUrl: "https://jtchs-form.thankyoudom.workers.dev/tts",
+      submitUrl: "",
+      submitText: "Thank you for completing the survey. Your responses have been recorded."
+    };
+    window.JTCHS_QUESTIONS = [
+      {
+        id: "q1",
+        title: "What is your age group?",
+        tts: "Question 1: I am,  60 - 64 years old, 65 - 69 years old, 70 - 74 years old, 75 - 79 years old, 80 years or older",
+        choices: ["60 – 64", "65 – 69", "70 – 74", "75 – 79", "80 or older"]
+      },
+      {
+        id: "q2",
+        title: "How do you describe your gender?",
+        tts: "Question 2: I am, female, or, I am, male,",
+        choices: ["Female", "Male"]
+      },
+      {
+        id: "q3",
+        title: "How often do you have doctor appointments?",
+        tts: "Question 3: I have doctor appointments, once per year, twice per year, three times per year, four or more times per year",
+        choices: ["Once per year", "Twice per year", "Three times per year", "Four or more times per year"]
+      },
+      {
+        id: "q4",
+        title: "Do you require transportation to your appointments?",
+        tts: "Question 4: I require transportation to my appointments, yes, or no ",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q5",
+        title: "In the last 4 weeks, how much of the time did you feel tired?",
+        tts: "Question 5: Fatigue: In the last 4 weeks, how much of the time did you feel tired? All or most of the time, Usually none of the time",
+        choices: ["All or most of the time", "Usually none of the time"]
+      },
+      {
+        id: "q6",
+        title: "Do you have any difficulty walking up 10 steps alone without resting or aids?",
+        tts: "Question 6: Resistance: Do you have any difficulty walking up 10 steps alone without resting or aids? yes, or no ",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q7",
+        title: "Do you have any difficulty walking several hundred yards alone without aids?",
+        tts: "Question 7: Aerobic/Ambulation: Do you have any difficulty walking several hundred yards alone without aids? yes, or no ",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q8",
+        title: "Do you have 5 or more illnesses (out of 11 common conditions)?",
+        tts: "Question 8: Illnesses: Do you have 5 or more illnesses (out of 11 common conditions)? yes, or no ",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q9",
+        title: "Have you lost more than 5% of your total body weight in the past 6 months?",
+        tts: "Question 9: Loss of Weight: Have you lost more than 5% of your total body weight in the past 6 months? yes, or no ",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q10",
+        title: "How would you rate your appetite?",
+        tts: "Question 10: My appetite is, very poor, poor, average, good, very good",
+        choices: ["Very poor", "Poor", "Average", "Good", "Very good"]
+      },
+      {
+        id: "q11",
+        title: "How would you rate how food tastes?",
+        tts: "Question 11: Food tastes, very poor, poor, average, good, very good",
+        choices: ["Very poor", "Poor", "Average", "Good", "Very good"]
+      },
+      {
+        id: "q12",
+        title: "When you eat, when do you feel full?",
+        tts: "Question 12: When I eat, I feel full after eating only a few mouthfuls, I feel full after eating about a third of the meal, I feel full after eating over half a meal, I feel full after eating most of the meal, I hardly ever feel full  ",
+        choices: [
+          "After only a few mouthfuls",
+          "After about a third of the meal",
+          "After over half a meal",
+          "After most of the meal",
+          "Hardly ever feel full"
+        ]
+      },
+      {
+        id: "q13",
+        title: "How many meals do you normally eat per day?",
+        tts: "Question 13: Normally I eat, Less than onemeal a day, One meal a day, Two meals a day, Three meals a day, More than three meals a day",
+        choices: [
+          "Less than one meal a day",
+          "One meal a day",
+          "Two meals a day",
+          "Three meals a day",
+          "More than three meals a day"
+        ]
+      },
+      {
+        id: "q14",
+        title: "Did you enjoy learning using Pepper?",
+        tts: "Question 14: I enjoyed learning using Pepper. yes, or no",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q15",
+        title: "Did you need help using Pepper?",
+        tts: "Question 15: I needed help with using Pepper. yes, or no",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q16",
+        title: "Did you feel comfortable using Pepper to answer questions about your health?",
+        tts: "Question 16: I felt comfortable using Pepper to answer questions about my health. yes, or no",
+        choices: ["Yes", "No"]
+      },
+      {
+        id: "q17",
+        title: "Did using Pepper make you feel more comfortable using technology for your healthcare?",
+        tts: "Question 17: Using Pepper made me feel comfortable using technology for my healthcare, agree , neutral, disagree",
+        choices: ["Agree", "Neutral", "Disagree"]
+      }
+    ];
+  </script>
+  <script src="js/jtchs-survey.js" defer></script>
+</head>
+<body>
+  <div id="tts-controls">
+    <span class="bar-label">Audio</span>
+    <div id="status-pill"><span id="status-dot"></span><span id="status-text">Ready</span></div>
+    <div id="waveform"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="spacer"></div>
+    <button class="ctrl-btn" id="btn-debug">Debug</button>
+    <div id="q-counter">Page 1 / 17</div>
+    <button class="ctrl-btn" id="btn-mute">Mute</button>
+    <button class="ctrl-btn" id="btn-replay">Replay</button>
+  </div>
+
+  <div id="survey-wrapper">
+    <div id="question-text"></div>
+    <div id="choices"></div>
+  </div>
+
+  <div id="start-overlay">
+    <p>Audio-assisted survey — tap below to begin</p>
+    <button type="button" id="btn-start">Start survey</button>
+  </div>
+
+  <div id="nav-bar">
+    <button type="button" id="btn-back">Back</button>
+    <button type="button" id="btn-next">Next</button>
+  </div>
+
+  <div id="debug-panel"></div>
+  <div id="toast"></div>
+</body>
+</html>
