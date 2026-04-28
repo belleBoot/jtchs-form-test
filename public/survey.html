@@ -212,7 +212,23 @@
     window.JTCHS_CONFIG = {
       workerTtsUrl: "https://jtchs-form.thankyoudom.workers.dev/tts",
       submitUrl: "",
-      submitText: "Thank you for completing the survey. Your responses have been recorded."
+      submitText: "Thank you for completing the survey. Your responses have been recorded.",
+      // If you want to submit directly to Formbricks (no account sharing needed):
+      // 1) Set appUrl, environmentId, surveyId below
+      // 2) Set dataMap values to the Formbricks *element IDs* for each question
+      //    (these are not the environment id; they come from the survey definition)
+      // 3) Leave submitUrl empty; the client will POST to:
+      //    {appUrl}/api/v2/client/{environmentId}/responses
+      formbricks: {
+        appUrl: "https://app.formbricks.com",
+        environmentId: "cmms3molo09piu701aeg36oqf",
+        surveyId: "cmmtnua0mat6gqh01fa42q9x5",
+        dataMap: {
+          q1: "unhkz9acsd3sf7y91acxqi8k",
+          q2: "", q3: "", q4: "", q5: "", q6: "", q7: "", q8: "", q9: "",
+          q10: "", q11: "", q12: "", q13: "", q14: "", q15: "", q16: "", q17: ""
+        }
+      }
     };
     window.JTCHS_QUESTIONS = [
       {
