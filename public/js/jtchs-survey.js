@@ -92,6 +92,47 @@
     xhr.send(body);
   }
 
+  function httpGetBlob(url, onBlob, onErr) {
+    if (hasFetch()) {
+      window
+        .fetch(url, { method: "GET", credentials: "same-origin" })
+        .then(function (res) {
+          if (!res.ok) {
+            return res.text().then(function (t) {
+              throw new Error("HTTP " + res.status + ": " + (t || "").substring(0, 120));
+            });
+          }
+          return res.blob();
+        })
+        .then(onBlob)
+        .catch(onErr);
+      return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.responseType = "blob";
+    xhr.onload = function () {
+      if (xhr.status >= 200 && xhr.status < 300) onBlob(xhr.response);
+      else onErr(new Error("HTTP " + xhr.status));
+    };
+    xhr.onerror = function () {
+      onErr(new Error("Network error"));
+    };
+    xhr.send();
+  }
+
+  /** Root-relative “/audio/…” breaks GitHub Pages project sites; use “audio/…” or set base in config. */
+  function resolveMediaUrl(src) {
+    if (!src || typeof src !== "string") return "";
+    if (/^https?:\/\//i.test(src)) return src;
+    try {
+      if (typeof window.URL === "function" && window.location && window.location.href) {
+        return new window.URL(src, window.location.href).href;
+      }
+    } catch (e0) {}
+    return src;
+  }
+
   var cfg = window.JTCHS_CONFIG || {};
   var WORKER_URL = cfg.workerTtsUrl || "";
   var SUBMIT_URL = cfg.submitUrl || "";
@@ -226,11 +267,21 @@
   function playAudioSrc(src) {
     if (muted || !src) return;
     stopAudio();
+    var resolved = resolveMediaUrl(src);
     setStatus("loading", "Loading…");
-    log("Loading audio: " + src, "info");
-    var audio = new Audio(src);
+    log("Audio: " + src + " → " + resolved, "info");
+
+    function failFinal(msg) {
+      log(msg, "err");
+      setStatus("error", "Audio error");
+      setWave(false);
+      showToast("Check audio path (use folder-relative base on GH Pages)");
+    }
+
+    var audio = new Audio(resolved);
     currentAudio = audio;
     audio.preload = "auto";
+    var triedBlobFallback = false;
     audio.onplay = function () {
       setStatus("playing", "Playing…");
       setWave(true);
@@ -242,10 +293,30 @@
       log("■ Done");
     };
     audio.onerror = function () {
-      log("Audio missing or failed to load: " + src, "err");
-      setStatus("error", "Missing file");
-      setWave(false);
-      showToast("Add MP3 under public/audio/jtchs/");
+      if (triedBlobFallback) {
+        failFinal("Audio not suitable / unsupported: " + resolved);
+        return;
+      }
+      triedBlobFallback = true;
+      log("Direct <audio> failed — loading via XHR/blob (older WebView)", "info");
+      stopAudio();
+      httpGetBlob(
+        resolved,
+        function (blob) {
+          if (!blob || blob.size < 64) {
+            failFinal("Empty response — wrong URL (404?)");
+            return;
+          }
+          if (blob.type && blob.type.indexOf("text/html") !== -1) {
+            failFinal("Got HTML instead of MP3 — fix audioBasePath (try audio/jtchs/ not /audio/…)");
+            return;
+          }
+          playBlob(blob);
+        },
+        function (err) {
+          failFinal(err && err.message ? err.message : String(err));
+        }
+      );
     };
     audio.play().catch(function (err) {
       log("Autoplay blocked: " + err.message, "err");
@@ -567,7 +638,7 @@
       pendingSrc = firstSrc;
       setTimeout(function () {
         try {
-          var warm = new Audio(firstSrc);
+          var warm = new Audio(resolveMediaUrl(firstSrc));
           warm.preload = "auto";
           log("Preloading page 1 audio file…", "info");
         } catch (e1) {}
