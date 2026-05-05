@@ -502,12 +502,23 @@
       var dataMap = FORMBRICKS.dataMap || {};
 
       var data = {};
+      var skipped = [];
       for (var idx = 0; idx < totalPages; idx++) {
         var kioskId = QUESTIONS[idx].id || "q" + (idx + 1);
         var elementId = dataMap[kioskId];
-        if (!elementId) continue;
+        if (!elementId) {
+          skipped.push(kioskId);
+          continue;
+        }
         data[elementId] = answers[idx];
       }
+      if (skipped.length) {
+        log(
+          "WARNING: dataMap missing for " + skipped.join(", ") + " — those answers are not sent",
+          "err"
+        );
+      }
+      log("Formbricks data fields: " + Object.keys(data).length + " / " + totalPages + " questions", "info");
 
       var url = appUrl + "/api/v2/client/" + environmentId + "/responses";
       var body = {
