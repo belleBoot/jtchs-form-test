@@ -100,7 +100,27 @@
   var submitText =
     cfg.submitText ||
     "Thank you for completing the survey. Your responses have been recorded.";
+  var SUBMIT_AUDIO_FILE = cfg.submitAudioFile || "submit.mp3";
   var totalPages = QUESTIONS.length;
+
+  function normalizeAudioBase(p) {
+    if (!p || typeof p !== "string") return "";
+    return p.replace(/\/*$/, "/");
+  }
+
+  function getQuestionAudioSrc(q) {
+    if (!q) return "";
+    var base = normalizeAudioBase(cfg.audioBasePath);
+    if (!base) return "";
+    var file = q.audioFile || (q.id ? q.id + ".mp3" : "");
+    return file ? base + file : "";
+  }
+
+  function getSubmitAudioSrc() {
+    var base = normalizeAudioBase(cfg.audioBasePath);
+    if (!base) return "";
+    return base + SUBMIT_AUDIO_FILE;
+  }
 
   var currentPage = 1;
   var muted = false;
@@ -108,6 +128,7 @@
   var audioCache = {};
   var audioUnlocked = false;
   var pendingText = null;
+  var pendingSrc = null;
   var answers = [];
   var selectedChoice = null;
   var submitting = false;
@@ -202,6 +223,69 @@
     });
   }
 
+  function playAudioSrc(src) {
+    if (muted || !src) return;
+    stopAudio();
+    setStatus("loading", "Loading…");
+    log("Loading audio: " + src, "info");
+    var audio = new Audio(src);
+    currentAudio = audio;
+    audio.preload = "auto";
+    audio.onplay = function () {
+      setStatus("playing", "Playing…");
+      setWave(true);
+      log("▶ Playing", "ok");
+    };
+    audio.onended = function () {
+      setStatus("", "Ready");
+      setWave(false);
+      log("■ Done");
+    };
+    audio.onerror = function () {
+      log("Audio missing or failed to load: " + src, "err");
+      setStatus("error", "Missing file");
+      setWave(false);
+      showToast("Add MP3 under public/audio/jtchs/");
+    };
+    audio.play().catch(function (err) {
+      log("Autoplay blocked: " + err.message, "err");
+      setStatus("", "Tap to play");
+      showToast("Tap Replay after selecting an answer");
+    });
+  }
+
+  function playQuestionAudio() {
+    if (muted) return;
+    var q = currentQuestion();
+    var src = getQuestionAudioSrc(q);
+    if (src) {
+      if (!audioUnlocked) {
+        log("Audio not yet unlocked — queuing file", "info");
+        pendingSrc = src;
+        return;
+      }
+      stopAudio();
+      playAudioSrc(src);
+      return;
+    }
+    fetchAndPlay(ttsForPage());
+  }
+
+  function playSubmitAudio() {
+    if (muted) return;
+    var src = getSubmitAudioSrc();
+    if (src) {
+      if (!audioUnlocked) {
+        pendingSrc = src;
+        return;
+      }
+      stopAudio();
+      playAudioSrc(src);
+      return;
+    }
+    fetchAndPlay(submitText);
+  }
+
   function fetchAndPlay(text) {
     if (muted || !text || !WORKER_URL) {
       if (!WORKER_URL && text) log("No workerTtsUrl — skipping audio", "info");
@@ -278,7 +362,7 @@
     if (currentPage < totalPages) {
       currentPage++;
       renderQuestion();
-      fetchAndPlay(ttsForPage());
+      playQuestionAudio();
       return;
     }
     doSubmit();
@@ -288,7 +372,7 @@
     if (currentPage <= 1) return;
     currentPage--;
     renderQuestion();
-    fetchAndPlay(ttsForPage());
+    playQuestionAudio();
   }
 
   function doSubmit() {
@@ -312,7 +396,7 @@
 
     function doneOk() {
       updateCounter(totalPages);
-      fetchAndPlay(submitText);
+      playSubmitAudio();
       showToast("Survey submitted");
       questionEl.textContent = "Thank you";
       choicesEl.innerHTML = "";
@@ -417,6 +501,12 @@
     audioUnlocked = true;
     startOverlay.classList.add("hidden");
     log("Audio unlocked", "ok");
+    if (pendingSrc) {
+      var ps = pendingSrc;
+      pendingSrc = null;
+      playAudioSrc(ps);
+      return;
+    }
     if (pendingText) {
       var t = pendingText;
       pendingText = null;
@@ -437,7 +527,7 @@
       audioUnlocked = true;
       startOverlay.classList.add("hidden");
     }
-    fetchAndPlay(ttsForPage());
+    playQuestionAudio();
     showToast("Replaying…");
   });
 
@@ -471,23 +561,35 @@
     updateCounter(1);
     renderQuestion();
     log("JTCHS survey (no Tally) | questions=" + totalPages, "ok");
+    var firstSrc = getQuestionAudioSrc(QUESTIONS[0]);
     var firstTts = ttsForPage();
-    pendingText = firstTts;
-    if (WORKER_URL) {
+    if (firstSrc) {
+      pendingSrc = firstSrc;
       setTimeout(function () {
-        log("Pre-fetching page 1 audio…");
-        httpPostBlob(
-          WORKER_URL,
-          { text: firstTts },
-          function (blob) {
-            audioCache[firstTts] = blob;
-            log("Welcome audio pre-cached", "ok");
-          },
-          function (err) {
-            log("Pre-fetch failed: " + (err && err.message ? err.message : err), "err");
-          }
-        );
+        try {
+          var warm = new Audio(firstSrc);
+          warm.preload = "auto";
+          log("Preloading page 1 audio file…", "info");
+        } catch (e1) {}
       }, 400);
+    } else {
+      pendingText = firstTts;
+      if (WORKER_URL) {
+        setTimeout(function () {
+          log("Pre-fetching page 1 audio…");
+          httpPostBlob(
+            WORKER_URL,
+            { text: firstTts },
+            function (blob) {
+              audioCache[firstTts] = blob;
+              log("Welcome audio pre-cached", "ok");
+            },
+            function (err) {
+              log("Pre-fetch failed: " + (err && err.message ? err.message : err), "err");
+            }
+          );
+        }, 400);
+      }
     }
   });
 })();

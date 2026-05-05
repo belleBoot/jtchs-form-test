@@ -105,7 +105,7 @@
     <div id="status-pill"><span id="status-dot"></span><span id="status-text">Ready</span></div>
     <div id="waveform"><span></span><span></span><span></span><span></span><span></span></div>
     <div class="spacer"></div>
-    <div id="voice-label">🎙 nova</div>
+    <div id="voice-label">MP3</div>
     <button class="ctrl-btn" id="btn-debug">🐛 Debug</button>
     <div id="q-counter">Page 1 / 17</div>
     <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
@@ -138,7 +138,8 @@
     // ═══════════════════════════════════════════════
     //  CONFIG
     // ═══════════════════════════════════════════════
-    var WORKER_URL = "https://jtchs-form.thankyoudom.workers.dev/tts";
+    // Pre-generated MP3s: public/audio/jtchs/q1.mp3 … q17.mp3, submit.mp3
+    var AUDIO_BASE = "/audio/jtchs/";
 
     var pageMap = {
      
@@ -171,7 +172,8 @@
     var currentAudio   = null;
     var audioCache     = {};
     var audioUnlocked  = false;  // true after first user gesture
-    var pendingText    = null;   // text queued before unlock
+    var pendingText    = null;   // text queued before unlock (legacy TTS)
+    var pendingSrc     = null;   // static file URL queued before unlock
  
     // ═══════════════════════════════════════════════
     //  UI refs
@@ -210,43 +212,104 @@
     // ═══════════════════════════════════════════════
     //  Start button — unlocks audio + hides overlay
     // ═══════════════════════════════════════════════
+    function audioSrcForPage(pageNum) {
+      return AUDIO_BASE + "q" + pageNum + ".mp3";
+    }
+
+    function audioSrcSubmit() {
+      return AUDIO_BASE + "submit.mp3";
+    }
+
     document.getElementById("btn-start").addEventListener("click", function() {
       audioUnlocked = true;
       startOverlay.classList.add("hidden");
       log("Audio unlocked by user gesture", "ok");
- 
-      // Play whatever was queued (page 1 welcome)
+
+      if (pendingSrc) {
+        var src = pendingSrc;
+        pendingSrc = null;
+        playAudioSrc(src);
+        return;
+      }
       if (pendingText) {
         var text = pendingText;
         pendingText = null;
         fetchAndPlay(text);
       }
     });
- 
-    // ═══════════════════════════════════════════════
-    //  TTS — Cloudflare Worker proxy
-    // ═══════════════════════════════════════════════
+
+    function playAudioSrc(src) {
+      if (muted || !src) return;
+      stopAudio();
+      setStatus("loading", "Loading…");
+      log("Loading: " + src, "ok");
+      var audio = new Audio(src);
+      currentAudio = audio;
+      audio.preload = "auto";
+      audio.onplay  = function() { setStatus("playing", "Playing…"); setWave(true); log("▶ Playing", "ok"); };
+      audio.onended = function() { setStatus("", "Ready"); setWave(false); log("■ Done"); };
+      audio.onerror = function() {
+        log("Missing or invalid audio: " + src, "err");
+        setStatus("error", "Missing file");
+        setWave(false);
+        showToast("Add MP3 files under public/audio/jtchs/");
+      };
+      audio.play().catch(function(err) {
+        log("Autoplay blocked: " + err.message, "err");
+        setStatus("", "Tap to play");
+        showToast("👆 Click anywhere, then hit Replay");
+      });
+    }
+
+    function playForPage(pageNum) {
+      if (muted) return;
+      var src = audioSrcForPage(pageNum);
+      if (!audioUnlocked) {
+        pendingSrc = src;
+        log("Audio not yet unlocked — queuing file", "info");
+        return;
+      }
+      stopAudio();
+      playAudioSrc(src);
+    }
+
+    function playSubmitClip() {
+      if (muted) return;
+      var src = audioSrcSubmit();
+      if (!audioUnlocked) {
+        pendingSrc = src;
+        return;
+      }
+      stopAudio();
+      playAudioSrc(src);
+    }
+
+    // Legacy TTS via Worker — unused when MP3s are present (see WORKER_URL below).
     function fetchAndPlay(text) {
       if (muted || !text) return;
- 
-      // If audio not yet unlocked, queue and wait
+
       if (!audioUnlocked) {
         log("Audio not yet unlocked — queuing: \"" + text.substring(0, 40) + "\"");
         pendingText = text;
         return;
       }
- 
+
       stopAudio();
- 
+
       if (audioCache[text]) {
         log("Cache hit — playing instantly", "ok");
         playBlob(audioCache[text]);
         return;
       }
- 
+
       setStatus("loading", "Generating…");
-      log("POST → Worker: \"" + text.substring(0, 50) + "\"");
- 
+      var WORKER_URL = "";
+      if (!WORKER_URL) {
+        log("No TTS worker — add MP3s to " + AUDIO_BASE, "err");
+        setStatus("error", "No audio");
+        return;
+      }
+
       fetch(WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -306,13 +369,12 @@
       if (event === "Tally.FormPageView") {
         currentPage = payload.page || 1;
         updateCounter(currentPage);
-        var text = pageMap[currentPage];
-        if (text) fetchAndPlay(text);
+        playForPage(currentPage);
       }
- 
+
       if (event === "Tally.FormSubmitted") {
         updateCounter(totalPages);
-        fetchAndPlay(submitText);
+        playSubmitClip();
         showToast("✓ Survey submitted");
       }
     });
@@ -322,9 +384,8 @@
     // ═══════════════════════════════════════════════
     document.getElementById("btn-replay").addEventListener("click", function() {
       if (muted) { showToast("Unmute first"); return; }
-      var text = pageMap[currentPage] || submitText;
       if (!audioUnlocked) { audioUnlocked = true; startOverlay.classList.add("hidden"); }
-      fetchAndPlay(text);
+      playForPage(currentPage);
       showToast("↺ Replaying…");
     });
  
@@ -345,22 +406,14 @@
     // ═══════════════════════════════════════════════
     window.addEventListener("load", function() {
       updateCounter(1);
-      log("JTCHS Survey loaded | proxy=Cloudflare Worker | voice=nova", "ok");
-      // Pre-fetch welcome audio in background while user reads the overlay
-      // It'll be cached and ready to play the instant they click Start
+      log("JTCHS Survey loaded | static MP3s → " + AUDIO_BASE, "ok");
+      pendingSrc = audioSrcForPage(1);
       setTimeout(function() {
-        log("Pre-fetching welcome audio…");
-        fetch(WORKER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: pageMap[1] })
-        })
-        .then(function(r) { return r.ok ? r.blob() : Promise.reject(r.status); })
-        .then(function(blob) {
-          audioCache[pageMap[1]] = blob;
-          log("Welcome audio pre-cached — ready to play instantly", "ok");
-        })
-        .catch(function(err) { log("Pre-fetch failed: " + err, "err"); });
+        try {
+          var warm = new Audio(audioSrcForPage(1));
+          warm.preload = "auto";
+          log("Preloading page 1 audio…", "ok");
+        } catch (e) {}
       }, 500);
     });
   </script>
