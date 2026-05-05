@@ -211,7 +211,8 @@
   <script>
     window.JTCHS_CONFIG = {
       // Pre-generated MP3s in public/audio/jtchs/ — q1.mp3 … q17.mp3, submit.mp3 (no TTS worker).
-      audioBasePath: "/audio/jtchs/",
+      // Use folder-relative path so GitHub Pages project URLs work (avoid leading "/audio/…").
+      audioBasePath: "audio/jtchs/",
       submitAudioFile: "submit.mp3",
       workerTtsUrl: "",
       submitUrl: "",
